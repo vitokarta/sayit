@@ -1,0 +1,13 @@
+# 環境變數（含 API keys）
+.env
+
+# Python
+venv/
+__pycache__/
+*.pyc
+
+# 暫存影片處理檔（mp4、mp3、快取）
+tmp/
+
+# macOS
+.DS_Store
