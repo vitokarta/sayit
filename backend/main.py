@@ -5,7 +5,7 @@ SayIt FastAPI 後端
 - GET  /video/{vid_id} 取得已處理影片資料（從 Supabase）
 """
 
-import os, uuid, threading, traceback
+import os, uuid, threading, traceback, json
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -40,6 +40,11 @@ class ProcessRequest(BaseModel):
     voice: str = "male"
 
 
+class FeedbackRequest(BaseModel):
+    segment_sentences: list
+    user_speech: str
+
+
 # ── Endpoints ────────────────────────────────────────────────────────────────
 
 @app.post("/process")
@@ -57,6 +62,48 @@ def process(req: ProcessRequest):
     t = threading.Thread(target=_run_job, args=(job_id, req.url, vid_id, req.voice), daemon=True)
     t.start()
     return {"status": "pending", "job_id": job_id, "video_id": vid_id}
+
+
+@app.post("/feedback")
+def feedback(req: FeedbackRequest):
+    original = "\n".join(s["zh"] for s in req.segment_sentences)
+    prompt = f"""你是嚴格但建設性的英語口語教練。學習者剛聽完一段英文音訊，用英文口頭描述內容。
+
+原始中文內容（供你理解語意用）：
+{original}
+
+學習者說的英文：
+"{req.user_speech}"
+
+任務：
+1. 寫出修正後的完整英文（保留學習者的大意，修正文法/用字錯誤，補充遺漏重點）
+   在修正後的文字中，用 [1] [2] [3]... 標記每個修正點的位置（標記放在修正詞彙之後）
+2. 提供修正後英文的繁體中文翻譯
+3. 列出學習者遺漏的重要內容（如有）
+4. 針對每個標記的修正點，說明原本錯誤及正確用法（繁體中文說明）
+5. 一句話整體建議
+
+請直接回傳 JSON，不要有其他文字：
+{{
+  "corrected": "修正後的英文，用 [1][2] 標記修正點",
+  "translation_zh": "修正後英文的繁體中文翻譯",
+  "missing_points": "遺漏的重點（繁體中文，沒有遺漏則填 null）",
+  "corrections": [
+    {{"id": 1, "original": "學習者原話片段", "corrected": "正確說法", "reason": "繁體中文說明"}}
+  ],
+  "summary": "一句話整體建議（繁體中文）"
+}}"""
+
+    result = pipeline._gemini_post({
+        "contents": [{"parts": [{"text": prompt}]}],
+        "generationConfig": {"temperature": 0.3, "maxOutputTokens": 2048}
+    })
+    raw = pipeline._gemma_text(result)
+    start = raw.find("{")
+    end = raw.rfind("}") + 1
+    if start == -1 or end == 0:
+        return {"error": "parse_failed"}
+    return json.loads(raw[start:end])
 
 
 @app.get("/status/{job_id}")

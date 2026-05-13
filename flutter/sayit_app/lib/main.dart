@@ -41,6 +41,7 @@ class _HomeScreenState extends State<HomeScreen> {
   final _urlController = TextEditingController();
   bool _loading = false;
   String? _error;
+  String _status = '';
   List<Map<String, String>> _history = [];
   String _voice = 'male'; // 'male' | 'female'
 
@@ -83,7 +84,7 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _process() async {
     final url = _urlController.text.trim();
     if (url.isEmpty) return;
-    setState(() { _loading = true; _error = null; });
+    setState(() { _loading = true; _error = null; _status = '送出請求中...'; });
 
     try {
       final res = await http.post(
@@ -93,11 +94,34 @@ class _HomeScreenState extends State<HomeScreen> {
       );
       final body = jsonDecode(res.body) as Map<String, dynamic>;
       final videoId = body['video_id'] as String;
+      if (body['status'] == 'pending') {
+        await _pollJob(body['job_id'] as String);
+      }
       await _openVideo(videoId);
     } catch (e) {
       setState(() => _error = e.toString());
     } finally {
-      setState(() => _loading = false);
+      setState(() { _loading = false; _status = ''; });
+    }
+  }
+
+  Future<void> _pollJob(String jobId) async {
+    const labels = {
+      'pending':     '排隊中...',
+      'downloading': '下載影片中...',
+      'transcribing': '語音轉文字中...',
+      'translating': '翻譯中...',
+      'uploading':   '上傳音訊中...',
+      'saving':      '儲存中...',
+    };
+    while (true) {
+      await Future.delayed(const Duration(seconds: 3));
+      final res = await http.get(Uri.parse('$_apiBase/status/$jobId'));
+      final data = jsonDecode(res.body) as Map<String, dynamic>;
+      final st = data['status'] as String;
+      if (st == 'done') return;
+      if (st == 'error') throw Exception(data['message'] ?? '處理失敗');
+      if (mounted) setState(() => _status = labels[st] ?? '處理中...');
     }
   }
 
@@ -187,6 +211,12 @@ class _HomeScreenState extends State<HomeScreen> {
                   : const Text('開始處理'),
             ),
           ),
+          if (_loading && _status.isNotEmpty) ...[
+            const SizedBox(height: 10),
+            Text(_status,
+              style: TextStyle(fontSize: 12,
+                color: Theme.of(context).colorScheme.primary)),
+          ],
           if (_error != null) ...[
             const SizedBox(height: 12),
             Text(_error!, style: const TextStyle(color: Colors.red)),
