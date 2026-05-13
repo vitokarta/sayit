@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:just_audio/just_audio.dart';
 import 'models.dart';
 
+const _speeds = [0.5, 0.75, 1.0, 1.25, 1.5];
+
 class PlayerScreen extends StatefulWidget {
   final Video video;
   const PlayerScreen({super.key, required this.video});
@@ -15,6 +17,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
   final _player = AudioPlayer();
   int _segIdx = 0;
   int _activeIdx = -1;
+  double _speed = 1.0;
   StreamSubscription? _posSub;
   StreamSubscription? _stateSub;
   final _scrollController = ScrollController();
@@ -47,6 +50,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     setState(() => _segIdx = idx);
     final seg = widget.video.segments[idx];
     await _player.setUrl(seg.audioUrl);
+    await _player.setSpeed(_speed);
 
     _posSub?.cancel();
     _posSub = _player.positionStream.listen((pos) {
@@ -90,6 +94,17 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _player.seek(Duration(milliseconds: (secs * 1000).round()));
   }
 
+  void _rewind10() {
+    final pos = _player.position;
+    final target = pos - const Duration(seconds: 10);
+    _player.seek(target < Duration.zero ? Duration.zero : target);
+  }
+
+  Future<void> _setSpeed(double speed) async {
+    setState(() => _speed = speed);
+    await _player.setSpeed(speed);
+  }
+
   @override
   void dispose() {
     _posSub?.cancel();
@@ -108,6 +123,43 @@ class _PlayerScreenState extends State<PlayerScreen> {
       appBar: AppBar(
         title: Text(widget.video.title, overflow: TextOverflow.ellipsis),
         actions: [
+          // 倒退 10s
+          IconButton(
+            icon: const Icon(Icons.replay_10),
+            tooltip: '倒退 10 秒',
+            onPressed: _rewind10,
+          ),
+          // 倍速選擇
+          PopupMenuButton<double>(
+            initialValue: _speed,
+            onSelected: _setSpeed,
+            tooltip: '播放速度',
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              child: Center(
+                child: Text(
+                  '${_speed == _speed.truncateToDouble() ? _speed.toInt() : _speed}x',
+                  style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+                ),
+              ),
+            ),
+            itemBuilder: (_) => _speeds
+                .map((s) => PopupMenuItem(
+                      value: s,
+                      child: Row(
+                        children: [
+                          if (s == _speed)
+                            const Icon(Icons.check, size: 16)
+                          else
+                            const SizedBox(width: 16),
+                          const SizedBox(width: 8),
+                          Text('${s}x'),
+                        ],
+                      ),
+                    ))
+                .toList(),
+          ),
+          // 播放 / 暫停
           StreamBuilder<PlayerState>(
             stream: _player.playerStateStream,
             builder: (_, snap) {
@@ -159,9 +211,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
                   Text(sent.en,
                       style: TextStyle(
                         fontSize: 16,
-                        fontWeight: isActive
-                            ? FontWeight.bold
-                            : FontWeight.normal,
+                        fontWeight:
+                            isActive ? FontWeight.bold : FontWeight.normal,
                         color: isActive
                             ? Theme.of(context).colorScheme.onPrimaryContainer
                             : null,
