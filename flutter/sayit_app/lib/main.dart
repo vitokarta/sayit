@@ -5,7 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'models.dart';
 import 'player_screen.dart';
 
-const _apiBase = 'https://sayit-x056.onrender.com';
+const _apiBase = 'https://sayit-us.onrender.com';
 const _historyKey = 'history';
 const _voiceKey   = 'voice';
 const _maxHistory = 3;

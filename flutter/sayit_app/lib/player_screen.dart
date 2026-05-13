@@ -7,7 +7,7 @@ import 'package:speech_to_text/speech_to_text.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'models.dart';
 
-const _apiBase = 'https://sayit-x056.onrender.com';
+const _apiBase = 'https://sayit-us.onrender.com';
 const _speeds = [0.5, 0.75, 1.0, 1.25, 1.5];
 
 enum _Phase { idle, prompting, ready, recording, evaluating, done }
