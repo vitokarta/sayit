@@ -141,6 +141,7 @@ def _run_job(job_id: str, url: str, vid_id: str, voice: str = "male"):
         local_dir = os.path.join("tmp", "sayit", vid_id)
         shutil.rmtree(local_dir, ignore_errors=True)
 
+        _cleanup_old_videos()
         jobs[job_id] = {"status": "done", "video_id": vid_id}
         print(f"[job {job_id[:8]}] ✅ 完成：{title}")
 
@@ -152,6 +153,27 @@ def _run_job(job_id: str, url: str, vid_id: str, voice: str = "male"):
 def _set(job_id: str, status: str):
     jobs[job_id]["status"] = status
     print(f"[job {job_id[:8]}] → {status}")
+
+
+MAX_VIDEOS = 10
+
+def _cleanup_old_videos():
+    result = supabase.table("videos").select("id, created_at").order("created_at").execute()
+    videos = result.data
+    if len(videos) <= MAX_VIDEOS:
+        return
+    for v in videos[:len(videos) - MAX_VIDEOS]:
+        vid_id = v["id"]
+        try:
+            files = supabase.storage.from_(STORAGE_BUCKET).list(vid_id)
+            if files:
+                supabase.storage.from_(STORAGE_BUCKET).remove(
+                    [f"{vid_id}/{f['name']}" for f in files]
+                )
+            supabase.table("videos").delete().eq("id", vid_id).execute()
+            print(f"  🗑️  清除舊影片：{vid_id}")
+        except Exception as e:
+            print(f"  ⚠️  清除失敗 {vid_id}：{e}")
 
 
 def _upload_audio(vid_id: str, segments: list) -> list:

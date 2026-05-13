@@ -3,5 +3,12 @@ venv/
 __pycache__/
 *.pyc
 
+# Secrets — never commit
+backend/.env
+*.env
+
+# Generated pipeline output (HTML contains embedded API key)
+tmp/
+
 # macOS
 .DS_Store
