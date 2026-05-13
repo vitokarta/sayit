@@ -264,9 +264,50 @@ def process_with_gemma(title, whisper_segs):
     print(f"  ✅ {len(segments)} 段，共 {total_sents} 句")
     _save_cache("gemma", segments)
     return segments
+# ── 步驟 4：生成摘要 ─────────────────────────────────────────────────────────
+
+def generate_summary(title, segments):
+    cached = _load_cache("summary")
+    if cached:
+        print("  ⚡ 摘要快取命中")
+        return cached
+
+    print("\n步驟 4：Gemini 生成摘要...")
+    all_zh = "\n".join(
+        s["zh"] for seg in segments for s in seg["sentences"]
+    )
+    prompt = f"""你是一位內容整理專家。請根據以下影片字幕，生成一份繁體中文結構化摘要。
+
+影片標題：{title}
+
+字幕內容：
+{all_zh}
+
+請直接回傳 JSON，不要有其他文字：
+{{
+  "overview": "100-200字的影片整體概述",
+  "topics": [
+    {{
+      "title": "主題標題",
+      "points": ["重點一", "重點二", "重點三"]
+    }}
+  ]
+}}"""
+
+    result = _gemini_post({
+        "contents": [{"parts": [{"text": prompt}]}],
+        "generationConfig": {"temperature": 0.3, "maxOutputTokens": 4096}
+    })
+    raw = _gemma_text(result)
+    start = raw.find("{")
+    end   = raw.rfind("}") + 1
+    summary = json.loads(raw[start:end])
+    print(f"  ✅ 摘要生成完成：{len(summary.get('topics', []))} 個主題")
+    _save_cache("summary", summary)
+    return summary
 
 
-# ── 步驟 4：Google TTS（每段一個 mp3 + 逐句時間戳）──────────────────────────
+# ── 步驟 5：Google TTS（每段一個 mp3 + 逐句時間戳）──────────────────────────
 
 TTS_SSML_LIMIT = 4500   # Google TTS 上限 5000 字元，留安全餘量
 
@@ -401,10 +442,11 @@ def tts_segments(segments):
     return segments
 
 
-# ── 步驟 5：產生 HTML 播放器 ──────────────────────────────────────────────────
+# ── 步驟 6：產生 HTML 播放器 ──────────────────────────────────────────────────
 
-def generate_html(title, segments):
-    data_json = json.dumps({"title": title, "segments": segments}, ensure_ascii=False)
+def generate_html(title, segments, summary=None):
+    data_json    = json.dumps({"title": title, "segments": segments}, ensure_ascii=False)
+    summary_json = json.dumps(summary or {}, ensure_ascii=False)
 
     html = f"""<!DOCTYPE html>
 <html lang="zh-Hant">
@@ -490,6 +532,25 @@ audio {{ width: 100%; height: 38px; accent-color: #7b8cff; }}
 .corr-arrow {{ color: #555; margin-right: 6px; }}
 .corr-new {{ color: #80ff80; margin-right: 8px; font-weight: 500; }}
 .corr-reason {{ display: block; color: #9090b8; margin-top: 4px; }}
+
+/* ── Summary ── */
+#summary-view {{ display: none; padding-top: 4px; }}
+.summary-overview {{ background: #16162a; border: 1px solid #2a2a4a;
+                     border-radius: 14px; padding: 20px 24px; margin-bottom: 20px; }}
+.summary-overview-label {{ font-size: 0.72em; color: #7b8cff; text-transform: uppercase;
+                            letter-spacing: 0.1em; margin-bottom: 10px; }}
+.summary-overview-text {{ font-size: 1em; color: #d0d0f0; line-height: 1.9; }}
+.summary-topic {{ background: #16162a; border: 1px solid #2a2a4a;
+                  border-radius: 14px; padding: 18px 22px; margin-bottom: 14px; }}
+.summary-topic-title {{ font-size: 1em; font-weight: 600; color: #a0a8ff;
+                        margin-bottom: 12px; padding-bottom: 10px;
+                        border-bottom: 1px solid #2a2a4a; }}
+.summary-points {{ list-style: none; padding: 0; margin: 0; }}
+.summary-points li {{ font-size: 0.93em; color: #c8c8e8; line-height: 1.8;
+                      padding: 5px 0 5px 20px; position: relative; }}
+.summary-points li::before {{ content: ""; position: absolute; left: 2px; top: 14px;
+                               width: 6px; height: 6px; border-radius: 50%;
+                               background: #7b8cff; opacity: 0.8; }}
 </style>
 </head>
 <body>
@@ -499,9 +560,11 @@ audio {{ width: 100%; height: 38px; accent-color: #7b8cff; }}
     <div class="mode-bar">
       <button class="mode-btn active" id="btn-listen" onclick="setMode('listen')">聆聽模式</button>
       <button class="mode-btn" id="btn-practice" onclick="setMode('practice')">練習模式</button>
+      <button class="mode-btn" id="btn-summary" onclick="setMode('summary')">摘要</button>
     </div>
   </div>
   <div id="segments-container"></div>
+  <div id="summary-view"></div>
 </div>
 
 <script>
@@ -515,10 +578,12 @@ function setMode(m) {{
   mode = m;
   document.getElementById('btn-listen').classList.toggle('active', m === 'listen');
   document.getElementById('btn-practice').classList.toggle('active', m === 'practice');
+  document.getElementById('btn-summary').classList.toggle('active', m === 'summary');
+  document.getElementById('segments-container').style.display = m === 'summary' ? 'none' : 'block';
+  document.getElementById('summary-view').style.display = m === 'summary' ? 'block' : 'none';
   document.querySelectorAll('.practice-zone').forEach(z => {{
     z.style.display = m === 'practice' ? 'block' : 'none';
   }});
-  // reset all audio
   document.querySelectorAll('audio').forEach(a => {{ a.pause(); a.currentTime = 0; }});
 }}
 
@@ -799,7 +864,29 @@ ${{original}}
   nextBtn.classList.add('visible');
 }}
 
+function buildSummary(summary) {{
+  if (!summary) return;
+  const view = document.getElementById('summary-view');
+  let html = `
+    <div class="summary-overview">
+      <div class="summary-overview-label">影片內容摘要</div>
+      <div class="summary-overview-text">${{summary.overview}}</div>
+    </div>`;
+  (summary.topics || []).forEach(topic => {{
+    const points = (topic.points || [])
+      .map(p => `<li>${{p}}</li>`).join('');
+    html += `
+    <div class="summary-topic">
+      <div class="summary-topic-title">${{topic.title}}</div>
+      <ul class="summary-points">${{points}}</ul>
+    </div>`;
+  }});
+  view.innerHTML = html;
+}}
+
+const SUMMARY = {summary_json};
 buildSegments();
+buildSummary(SUMMARY);
 setMode('listen');
 </script>
 </body>
@@ -864,10 +951,13 @@ if __name__ == "__main__":
     segments = process_with_gemma(title, whisper_segs)
 
     # Step 4
+    summary = generate_summary(title, segments)
+
+    # Step 5
     segments = tts_segments(segments)
 
-    # Step 5：產生 HTML
-    html = generate_html(title, segments)
+    # Step 6：產生 HTML
+    html = generate_html(title, segments, summary)
     html_path = os.path.join(OUTPUT_DIR, "player.html")
     with open(html_path, "w", encoding="utf-8") as f:
         f.write(html)
