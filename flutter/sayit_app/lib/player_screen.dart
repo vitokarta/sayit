@@ -81,8 +81,19 @@ class _PlayerScreenState extends State<PlayerScreen> {
     final key = _keys[idx];
     final ctx = key.currentContext;
     if (ctx == null) return;
-    Scrollable.ensureVisible(ctx,
-        duration: const Duration(milliseconds: 300), alignment: 0.3);
+    final box = ctx.findRenderObject() as RenderBox?;
+    if (box == null) return;
+    final itemOffset = box.localToGlobal(Offset.zero).dy;
+    final itemHeight = box.size.height;
+    final screenHeight = MediaQuery.of(ctx).size.height;
+    final currentScroll = _scrollController.offset;
+    // 目標：讓 item 中心對齊畫面中心
+    final target = currentScroll + itemOffset - (screenHeight / 2) + (itemHeight / 2);
+    _scrollController.animateTo(
+      target.clamp(0.0, _scrollController.position.maxScrollExtent),
+      duration: const Duration(milliseconds: 350),
+      curve: Curves.easeInOut,
+    );
   }
 
   void _jumpTo(int segIdx, int sentIdx) {
@@ -210,17 +221,17 @@ class _PlayerScreenState extends State<PlayerScreen> {
                 children: [
                   Text(sent.en,
                       style: TextStyle(
-                        fontSize: 16,
+                        fontSize: isActive ? 18 : 15,
                         fontWeight:
                             isActive ? FontWeight.bold : FontWeight.normal,
                         color: isActive
                             ? Theme.of(context).colorScheme.onPrimaryContainer
-                            : null,
+                            : Theme.of(context).colorScheme.onSurface.withOpacity(0.4),
                       )),
                   const SizedBox(height: 4),
                   Text(sent.zh,
                       style: TextStyle(
-                        fontSize: 13,
+                        fontSize: isActive ? 13 : 11,
                         color: isActive
                             ? Theme.of(context)
                                 .colorScheme
@@ -229,7 +240,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                             : Theme.of(context)
                                 .colorScheme
                                 .onSurface
-                                .withOpacity(0.5),
+                                .withOpacity(0.25),
                       )),
                 ],
               ),
