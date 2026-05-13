@@ -553,7 +553,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
               ),
               const SizedBox(width: 8),
               const Expanded(
-                child: Text('錄音中... 靜音 3 秒自動送出', style: TextStyle(fontSize: 13)),
+                child: Text('錄音中...', style: TextStyle(fontSize: 13)),
               ),
               TextButton(onPressed: _stopRecording, child: const Text('完成')),
             ]),

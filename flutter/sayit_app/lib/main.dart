@@ -109,8 +109,6 @@ class _HomeScreenState extends State<HomeScreen> {
     const labels = {
       'pending':     '排隊中...',
       'downloading': '下載影片中...',
-      'transcribing': '語音轉文字中...',
-      'translating': '翻譯中...',
       'uploading':   '上傳音訊中...',
       'saving':      '儲存中...',
     };

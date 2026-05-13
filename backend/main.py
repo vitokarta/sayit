@@ -6,7 +6,7 @@ SayIt FastAPI 後端
 """
 
 import os, uuid, threading, traceback, json
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from supabase import create_client
@@ -116,7 +116,7 @@ def get_video(video_id: str):
     result = supabase.table("videos").select("*").eq("id", video_id).execute()
     if result.data:
         return result.data[0]
-    return {"error": "not found"}, 404
+    raise HTTPException(status_code=404, detail="not found")
 
 
 # ── Background job ────────────────────────────────────────────────────────────

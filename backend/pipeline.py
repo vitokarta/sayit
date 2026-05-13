@@ -20,10 +20,11 @@ CHUNK_SECONDS   = 20 * 60
 TTS_VOICE       = "en-US-Wavenet-D"
 MODEL_PRIMARY   = "gemini-3-flash-preview"
 MODEL_FALLBACK  = "gemini-3.1-flash-lite"
+THINKING_MODELS = {MODEL_PRIMARY}
 
 
 def _gemma_text(result):
-    """從 Gemma 4 回應中只取非思考的 part（thought != True）"""
+    """從 Gemini 回應中只取非思考的 part（thought != True）"""
     parts = result["candidates"][0]["content"]["parts"]
     return "".join(p["text"] for p in parts if not p.get("thought", False))
 
@@ -143,9 +144,14 @@ def transcribe(audio_paths):
 
 def _gemini_post(payload, timeout=300):
     def _call(model):
+        p = payload
+        if model not in THINKING_MODELS:
+            gc = p.get("generationConfig", {})
+            if "thinkingConfig" in gc:
+                p = {**p, "generationConfig": {k: v for k, v in gc.items() if k != "thinkingConfig"}}
         url  = (f"https://generativelanguage.googleapis.com/v1beta/"
                 f"models/{model}:generateContent?key={GEMINI_API_KEY}")
-        data = json.dumps(payload).encode("utf-8")
+        data = json.dumps(p).encode("utf-8")
         req  = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"})
         for attempt in range(3):
             try:
@@ -220,11 +226,19 @@ Return ONLY valid JSON:
 
     result = _gemini_post({
         "contents": [{"parts": [{"text": prompt}]}],
-        "generationConfig": {"temperature": 0.1, "maxOutputTokens": 256}
+        "generationConfig": {
+            "temperature": 0.1,
+            "maxOutputTokens": 2048,
+            "thinkingConfig": {"thinkingBudget": 0}
+        }
     }, timeout=120)
 
     raw = _gemma_text(result)
-    segs = json.loads(_extract_json(raw, '"segments"'))["segments"]
+    try:
+        segs = json.loads(_extract_json(raw, '"segments"'))["segments"]
+    except (ValueError, KeyError) as e:
+        print(f"  ⚠️  分段解析失敗：{e}\n  raw: {raw[:500]}")
+        raise
 
     boundaries = [(seg["start"] - 1, seg["end"]) for seg in segs]  # 0-based start, exclusive end
     # 確保最後一段覆蓋到底
@@ -256,11 +270,19 @@ Return ONLY valid JSON:
 
     result = _gemini_post({
         "contents": [{"parts": [{"text": prompt}]}],
-        "generationConfig": {"temperature": 0.3, "maxOutputTokens": 8192}
+        "generationConfig": {
+            "temperature": 0.3,
+            "maxOutputTokens": 8192,
+            "thinkingConfig": {"thinkingBudget": 0}
+        }
     })
 
     raw = _gemma_text(result)
-    return json.loads(_extract_json(raw, '"sentences"'))["sentences"]
+    try:
+        return json.loads(_extract_json(raw, '"sentences"'))["sentences"]
+    except (ValueError, KeyError) as e:
+        print(f"  ⚠️  翻譯解析失敗：{e}\n  raw tail: {raw[-300:]}")
+        raise
 
 
 def process_with_gemma(title, whisper_segs):
@@ -325,12 +347,14 @@ def generate_summary(title, segments):
 
     result = _gemini_post({
         "contents": [{"parts": [{"text": prompt}]}],
-        "generationConfig": {"temperature": 0.3, "maxOutputTokens": 4096}
+        "generationConfig": {
+            "temperature": 0.3,
+            "maxOutputTokens": 4096,
+            "thinkingConfig": {"thinkingBudget": 0}
+        }
     })
     raw = _gemma_text(result)
-    start = raw.find("{")
-    end   = raw.rfind("}") + 1
-    summary = json.loads(raw[start:end])
+    summary = json.loads(_extract_json(raw, '"overview"'))
     print(f"  ✅ 摘要生成完成：{len(summary.get('topics', []))} 個主題")
     _save_cache("summary", summary)
     return summary
@@ -394,7 +418,7 @@ def _split_into_ssml_batches(sents):
 
 
 def tts_segments(segments):
-    print(f"\n步驟 4：Google TTS 生成語音")
+    print(f"\n步驟 5：Google TTS 生成語音")
 
     cached = _load_cache("tts")
     if cached:
