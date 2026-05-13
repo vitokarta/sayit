@@ -43,10 +43,11 @@ python -m uvicorn main:app --reload
 - `SUPABASE_SERVICE_ROLE_KEY`
 - `SUPADATA_API_KEY` — 字幕擷取（supadata.ai，免費 100 次/月）
 - `YOUTUBE_COOKIES_B64` — yt-dlp fallback 用（選用）
+- `API_SECRET` — 後端保護用，Render 環境變數也要設定
 
 ## 部署
 
-- **後端**：Render（Docker），`https://sayit-x056.onrender.com`，從 GitHub `vitokarta/sayit` 自動部署
+- **後端**：Render（Docker），`https://sayit-us.onrender.com`（Oregon，US West），從 GitHub `vitokarta/sayit` 自動部署
 - **資料**：Supabase，bucket `sayit-audio`，table `videos`
 
 ## Supabase 資料結構
@@ -64,10 +65,22 @@ data    JSONB — { segments: [ { audio_url, sentences: [ { zh, en, tts_start } 
 - 套件：`http`（API 呼叫）、`just_audio`（音訊播放）
 - 聆聽模式：逐句高亮，點句子跳時間點，segment 播完自動接下一段
 
+### 執行（本機模擬器）
+
+```bash
+cd flutter/sayit_app
+flutter run --dart-define=API_SECRET=sayit-2026-secret
+```
+
+### API 保護
+
+後端要求每個請求帶 `X-Api-Secret` header，secret 透過 `--dart-define` 在 compile time 注入，不存在 source code 裡。
+
 ## 開發狀態
 
 - [x] Backend pipeline
 - [x] FastAPI 後端
-- [x] Render 部署
-- [x] Flutter 聆聽模式（開發中）
+- [x] Render 部署（Oregon，US West）
+- [x] API secret 保護
+- [x] Flutter 聆聽模式
 - [ ] Flutter 練習模式（口說批改）
