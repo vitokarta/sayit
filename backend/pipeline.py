@@ -3,9 +3,8 @@ SayIt Pipeline v2
 YouTube → Whisper（中文）→ Gemma（校正+翻譯+分段）→ Google TTS → HTML 播放器
 """
 
-import os, sys, json, re, subprocess, urllib.request, urllib.error, base64, time
+import os, sys, json, re, subprocess, urllib.request, urllib.error, base64, time, tempfile
 from dotenv import load_dotenv
-from pytubefix import YouTube
 from groq import Groq
 
 load_dotenv()
@@ -13,6 +12,15 @@ load_dotenv()
 GROQ_API_KEY    = os.getenv("GROQ_API_KEY")
 GEMINI_API_KEY  = os.getenv("GEMINI_API_KEY")
 GOOGLE_TTS_KEY  = os.getenv("GOOGLE_TTS_API_KEY")
+
+# 若有設定 YOUTUBE_COOKIES_B64，解碼寫入暫存檔供 yt-dlp 使用
+_COOKIES_FILE = None
+_cookies_b64 = os.getenv("YOUTUBE_COOKIES_B64")
+if _cookies_b64:
+    _tf = tempfile.NamedTemporaryFile(mode="wb", suffix=".txt", delete=False)
+    _tf.write(base64.b64decode(_cookies_b64))
+    _tf.close()
+    _COOKIES_FILE = _tf.name
 YOUTUBE_URL     = "https://www.youtube.com/watch?v=W3usaA6UwyI"
 OUTPUT_DIR      = "tmp/sayit/default"
 GROQ_MAX_BYTES  = 24 * 1024 * 1024
@@ -59,6 +67,41 @@ def _merge_short_fragments(segs, min_len=5):
     return result
 
 
+# ── 字幕擷取（優先於下載）────────────────────────────────────────────────────
+
+def _get_video_title(url):
+    oembed_url = f"https://www.youtube.com/oembed?url={url}&format=json"
+    try:
+        with urllib.request.urlopen(oembed_url, timeout=10) as resp:
+            return json.loads(resp.read())["title"]
+    except Exception:
+        return "video"
+
+
+def _transcribe_via_captions(vid_id):
+    """嘗試用 YouTube 自動字幕取得逐字稿，不可用則回傳 None"""
+    cached = _load_cache("whisper")
+    if cached:
+        print(f"  ⚡ 快取命中：{len(cached)} 句")
+        return cached
+
+    try:
+        from youtube_transcript_api import YouTubeTranscriptApi
+        entries = YouTubeTranscriptApi().fetch(
+            vid_id, languages=["zh-TW", "zh-Hant", "zh-Hans", "zh"]
+        )
+        segs = [
+            {"start": e.start, "end": e.start + e.duration, "text": e.text.strip()}
+            for e in entries if e.text.strip()
+        ]
+        print(f"  ✅ 字幕擷取成功：{len(segs)} 句")
+        _save_cache("whisper", segs)
+        return segs
+    except Exception as e:
+        print(f"  ⚠️  字幕不可用：{e}")
+        return None
+
+
 # ── 步驟 1：下載音訊 ─────────────────────────────────────────────────────────
 
 def download_audio(url):
@@ -72,21 +115,35 @@ def download_audio(url):
             print(f"  ⚡ 快取命中：{cached['title']}")
             return paths, cached["title"]
 
-    yt = YouTube(url)
-    print(f"  標題：{yt.title}")
-    stream = yt.streams.get_audio_only()
-    path = stream.download(output_path=OUTPUT_DIR, filename="audio_orig.mp4")
+    # 先用 yt-dlp 取得標題
+    YT_ARGS = ["--extractor-args", "youtube:player_client=android", "--no-playlist"]
+    if _COOKIES_FILE:
+        YT_ARGS += ["--cookies", _COOKIES_FILE]
+    info = json.loads(subprocess.check_output(
+        ["yt-dlp", "--dump-json"] + YT_ARGS + [url], text=True
+    ))
+    title = info.get("title", "video")
+    duration = info.get("duration", 0)
+    print(f"  標題：{title}")
+
+    path = os.path.join(OUTPUT_DIR, "audio_orig.mp3")
+    subprocess.run(
+        ["yt-dlp", "-f", "bestaudio", "-x", "--audio-format", "mp3",
+         "-o", path] + YT_ARGS + [url],
+        check=True
+    )
+
     size = os.path.getsize(path)
     print(f"  ✅ 下載完成（{size/1024/1024:.1f} MB）")
 
     if size > GROQ_MAX_BYTES:
         print(f"  ⚠️  超過 24MB，切成 {CHUNK_SECONDS//60} 分鐘段落")
-        paths = _split_audio(path, yt.length)
+        paths = _split_audio(path, duration)
     else:
         paths = [path]
 
-    _save_cache("download", {"paths": paths, "title": yt.title})
-    return paths, yt.title
+    _save_cache("download", {"paths": paths, "title": title})
+    return paths, title
 
 
 def _split_audio(path, total_sec):
@@ -976,8 +1033,16 @@ def run(url, voice="male"):
     OUTPUT_DIR = os.path.join("tmp", "sayit", vid_id)
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-    audio_paths, title = download_audio(url)
-    whisper_segs       = transcribe(audio_paths)
+    print("\n步驟 1：取得逐字稿")
+    whisper_segs = _transcribe_via_captions(vid_id)
+    if whisper_segs is not None:
+        title = _get_video_title(url)
+        print(f"  標題：{title}")
+    else:
+        print("  改用下載 + Whisper")
+        audio_paths, title = download_audio(url)
+        whisper_segs = transcribe(audio_paths)
+
     segments           = process_with_gemma(title, whisper_segs)
     segments           = tts_segments(segments)
 
