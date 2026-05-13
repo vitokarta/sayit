@@ -7,8 +7,14 @@ import 'package:speech_to_text/speech_to_text.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'models.dart';
 
-const _apiBase = 'https://sayit-us.onrender.com';
+const _apiBase    = 'https://sayit-us.onrender.com';
+const _apiSecret  = String.fromEnvironment('API_SECRET', defaultValue: '');
 const _speeds = [0.5, 0.75, 1.0, 1.25, 1.5];
+
+Map<String, String> get _authHeaders => {
+  'Content-Type': 'application/json',
+  if (_apiSecret.isNotEmpty) 'X-Api-Secret': _apiSecret,
+};
 
 enum _Phase { idle, prompting, ready, recording, evaluating, done }
 
@@ -231,7 +237,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
       final seg = widget.video.segments[_practiceSeg];
       final res = await http.post(
         Uri.parse('$_apiBase/feedback'),
-        headers: {'Content-Type': 'application/json'},
+        headers: _authHeaders,
         body: jsonEncode({
           'segment_sentences': seg.sentences
               .map((s) => {'zh': s.zh, 'en': s.en})

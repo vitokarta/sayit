@@ -5,10 +5,16 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'models.dart';
 import 'player_screen.dart';
 
-const _apiBase = 'https://sayit-us.onrender.com';
+const _apiBase    = 'https://sayit-us.onrender.com';
+const _apiSecret  = String.fromEnvironment('API_SECRET', defaultValue: '');
 const _historyKey = 'history';
 const _voiceKey   = 'voice';
 const _maxHistory = 3;
+
+Map<String, String> get _authHeaders => {
+  'Content-Type': 'application/json',
+  if (_apiSecret.isNotEmpty) 'X-Api-Secret': _apiSecret,
+};
 
 void main() {
   runApp(const SayItApp());
@@ -89,7 +95,7 @@ class _HomeScreenState extends State<HomeScreen> {
     try {
       final res = await http.post(
         Uri.parse('$_apiBase/process'),
-        headers: {'Content-Type': 'application/json'},
+        headers: _authHeaders,
         body: jsonEncode({'url': url, 'voice': _voice}),
       );
       final body = jsonDecode(res.body) as Map<String, dynamic>;
@@ -114,7 +120,7 @@ class _HomeScreenState extends State<HomeScreen> {
     };
     while (true) {
       await Future.delayed(const Duration(seconds: 3));
-      final res = await http.get(Uri.parse('$_apiBase/status/$jobId'));
+      final res = await http.get(Uri.parse('$_apiBase/status/$jobId'), headers: _authHeaders);
       final data = jsonDecode(res.body) as Map<String, dynamic>;
       final st = data['status'] as String;
       if (st == 'done') return;
@@ -126,7 +132,7 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _openVideo(String videoId) async {
     setState(() { _loading = true; _error = null; });
     try {
-      final res = await http.get(Uri.parse('$_apiBase/video/$videoId'));
+      final res = await http.get(Uri.parse('$_apiBase/video/$videoId'), headers: _authHeaders);
       if (res.statusCode != 200) throw Exception('找不到影片');
       final video = Video.fromJson(
           jsonDecode(res.body) as Map<String, dynamic>);

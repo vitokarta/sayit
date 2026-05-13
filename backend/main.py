@@ -6,8 +6,9 @@ SayIt FastAPI 後端
 """
 
 import os, uuid, threading, traceback, json
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from supabase import create_client
 from dotenv import load_dotenv
@@ -18,6 +19,7 @@ load_dotenv()
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
 STORAGE_BUCKET = "sayit-audio"
+API_SECRET    = os.getenv("API_SECRET")
 
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
@@ -28,6 +30,12 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+@app.middleware("http")
+async def verify_secret(request: Request, call_next):
+    if API_SECRET and request.headers.get("X-Api-Secret") != API_SECRET:
+        return JSONResponse(status_code=401, content={"error": "unauthorized"})
+    return await call_next(request)
 
 # 記憶體內的 job 狀態（伺服器重啟會清空，但影片結果在 Supabase 不會消失）
 jobs: dict = {}
