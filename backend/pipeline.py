@@ -250,6 +250,8 @@ def _gemini_post(payload, timeout=300):
                     print(f"  ⚠️  HTTP {e.code}，{wait}s 後重試（{attempt+1}/2）...")
                     time.sleep(wait)
                 else:
+                    body = e.read().decode("utf-8", errors="ignore")
+                    print(f"  ❌ Gemini HTTP {e.code}：{body[:300]}")
                     raise
             except (TimeoutError, OSError):
                 if attempt < 2:
