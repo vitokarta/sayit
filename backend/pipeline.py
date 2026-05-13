@@ -18,6 +18,8 @@ OUTPUT_DIR      = "tmp/sayit/default"
 GROQ_MAX_BYTES  = 24 * 1024 * 1024
 CHUNK_SECONDS   = 20 * 60
 TTS_VOICE       = "en-US-Wavenet-D"
+MODEL_PRIMARY   = "gemini-3-flash-preview"
+MODEL_FALLBACK  = "gemini-3.1-flash-lite"
 
 
 def _gemma_text(result):
@@ -139,22 +141,40 @@ def transcribe(audio_paths):
 
 # ── 步驟 3：Gemma 校正 + 翻譯 + 分段 ────────────────────────────────────────
 
-def _gemini_post(payload, timeout=600):
-    url  = (f"https://generativelanguage.googleapis.com/v1beta/"
-            f"models/gemini-3.1-flash-lite:generateContent?key={GEMINI_API_KEY}")
-    data = json.dumps(payload).encode("utf-8")
-    req  = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"})
-    for attempt in range(3):
-        try:
-            with urllib.request.urlopen(req, timeout=timeout) as resp:
-                return json.loads(resp.read().decode("utf-8"))
-        except urllib.error.HTTPError as e:
-            if e.code in (429, 500, 503) and attempt < 2:
-                wait = 10 * (attempt + 1)
-                print(f"  ⚠️  HTTP {e.code}，{wait}s 後重試（{attempt+1}/2）...")
-                time.sleep(wait)
-            else:
-                raise
+def _gemini_post(payload, timeout=300):
+    def _call(model):
+        url  = (f"https://generativelanguage.googleapis.com/v1beta/"
+                f"models/{model}:generateContent?key={GEMINI_API_KEY}")
+        data = json.dumps(payload).encode("utf-8")
+        req  = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"})
+        for attempt in range(3):
+            try:
+                with urllib.request.urlopen(req, timeout=timeout) as resp:
+                    return json.loads(resp.read().decode("utf-8"))
+            except urllib.error.HTTPError as e:
+                if e.code == 429:
+                    raise  # quota — let caller decide whether to fallback
+                elif e.code in (500, 503) and attempt < 2:
+                    wait = 10 * (attempt + 1)
+                    print(f"  ⚠️  HTTP {e.code}，{wait}s 後重試（{attempt+1}/2）...")
+                    time.sleep(wait)
+                else:
+                    raise
+            except (TimeoutError, OSError):
+                if attempt < 2:
+                    wait = 15 * (attempt + 1)
+                    print(f"  ⚠️  Timeout，{wait}s 後重試（{attempt+1}/2）...")
+                    time.sleep(wait)
+                else:
+                    raise
+
+    try:
+        return _call(MODEL_PRIMARY)
+    except urllib.error.HTTPError as e:
+        if e.code == 429:
+            print(f"  ⚠️  {MODEL_PRIMARY} quota 耗盡，切換 {MODEL_FALLBACK}...")
+            return _call(MODEL_FALLBACK)
+        raise
 
 
 def _extract_json(raw, anchor):
@@ -846,9 +866,10 @@ ${{original}}
   "summary": "一句話整體建議（繁體中文）"
 }}`;
 
-  try {{
+  const FB_MODELS = ['gemini-3-flash-preview', 'gemini-3.1-flash-lite'];
+  async function callFeedbackApi(model) {{
     const resp = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemma-3-27b-it:generateContent?key=${{GEMINI_KEY}}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/${{model}}:generateContent?key=${{GEMINI_KEY}}`,
       {{
         method: 'POST',
         headers: {{ 'Content-Type': 'application/json' }},
@@ -858,7 +879,20 @@ ${{original}}
         }})
       }}
     );
-    const result = await resp.json();
+    if (resp.status === 429) throw Object.assign(new Error('quota'), {{quota: true}});
+    return resp.json();
+  }}
+
+  try {{
+    let result;
+    try {{
+      result = await callFeedbackApi(FB_MODELS[0]);
+    }} catch(e) {{
+      if (e.quota) {{
+        console.log('批改切換備用模型:', FB_MODELS[1]);
+        result = await callFeedbackApi(FB_MODELS[1]);
+      }} else throw e;
+    }}
     const text = gemmaOutputText(result);
     const data = extractJson(text);
     if (data) {{
@@ -910,9 +944,10 @@ def get_video_id(url):
     return m.group(1) if m else "video"
 
 
-def run(url):
+def run(url, voice="male"):
     """完整跑一部影片，回傳 (vid_id, title, segments)。供 FastAPI 呼叫。"""
-    global OUTPUT_DIR
+    global OUTPUT_DIR, TTS_VOICE
+    TTS_VOICE = "en-US-Wavenet-F" if voice == "female" else "en-US-Wavenet-D"
     vid_id = get_video_id(url)
     OUTPUT_DIR = os.path.join("tmp", "sayit", vid_id)
     os.makedirs(OUTPUT_DIR, exist_ok=True)

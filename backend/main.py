@@ -37,6 +37,7 @@ jobs: dict = {}
 
 class ProcessRequest(BaseModel):
     url: str
+    voice: str = "male"
 
 
 # ── Endpoints ────────────────────────────────────────────────────────────────
@@ -53,7 +54,7 @@ def process(req: ProcessRequest):
     # 新 job
     job_id = str(uuid.uuid4())
     jobs[job_id] = {"status": "pending", "video_id": vid_id}
-    t = threading.Thread(target=_run_job, args=(job_id, req.url, vid_id), daemon=True)
+    t = threading.Thread(target=_run_job, args=(job_id, req.url, vid_id, req.voice), daemon=True)
     t.start()
     return {"status": "pending", "job_id": job_id, "video_id": vid_id}
 
@@ -73,10 +74,10 @@ def get_video(video_id: str):
 
 # ── Background job ────────────────────────────────────────────────────────────
 
-def _run_job(job_id: str, url: str, vid_id: str):
+def _run_job(job_id: str, url: str, vid_id: str, voice: str = "male"):
     try:
         _set(job_id, "downloading")
-        vid_id, title, segments = pipeline.run(url)
+        vid_id, title, segments = pipeline.run(url, voice=voice)
 
         _set(job_id, "uploading")
         updated_segments = _upload_audio(vid_id, segments)

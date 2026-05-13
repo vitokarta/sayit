@@ -7,6 +7,7 @@ import 'player_screen.dart';
 
 const _apiBase = 'https://sayit-x056.onrender.com';
 const _historyKey = 'history';
+const _voiceKey   = 'voice';
 const _maxHistory = 3;
 
 void main() {
@@ -41,14 +42,15 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _loading = false;
   String? _error;
   List<Map<String, String>> _history = [];
+  String _voice = 'male'; // 'male' | 'female'
 
   @override
   void initState() {
     super.initState();
-    _loadHistory();
+    _loadPrefs();
   }
 
-  Future<void> _loadHistory() async {
+  Future<void> _loadPrefs() async {
     final prefs = await SharedPreferences.getInstance();
     final raw = prefs.getString(_historyKey);
     if (raw != null) {
@@ -58,6 +60,15 @@ class _HomeScreenState extends State<HomeScreen> {
             .toList();
       });
     }
+    setState(() {
+      _voice = prefs.getString(_voiceKey) ?? 'male';
+    });
+  }
+
+  Future<void> _setVoice(String v) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_voiceKey, v);
+    setState(() => _voice = v);
   }
 
   Future<void> _saveToHistory(String id, String title) async {
@@ -78,7 +89,7 @@ class _HomeScreenState extends State<HomeScreen> {
       final res = await http.post(
         Uri.parse('$_apiBase/process'),
         headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({'url': url}),
+        body: jsonEncode({'url': url, 'voice': _voice}),
       );
       final body = jsonDecode(res.body) as Map<String, dynamic>;
       final videoId = body['video_id'] as String;
@@ -136,6 +147,25 @@ class _HomeScreenState extends State<HomeScreen> {
             const SizedBox(height: 20),
           ],
 
+          // 語音選擇
+          Row(
+            children: [
+              Text('語音', style: Theme.of(context).textTheme.labelLarge),
+              const SizedBox(width: 12),
+              ChoiceChip(
+                label: const Text('男聲'),
+                selected: _voice == 'male',
+                onSelected: (_) => _setVoice('male'),
+              ),
+              const SizedBox(width: 8),
+              ChoiceChip(
+                label: const Text('女聲'),
+                selected: _voice == 'female',
+                onSelected: (_) => _setVoice('female'),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
           // URL 輸入
           TextField(
             controller: _urlController,
