@@ -3,7 +3,7 @@ SayIt Pipeline v2
 YouTube → Whisper（中文）→ Gemma（校正+翻譯+分段）→ Google TTS → HTML 播放器
 """
 
-import os, sys, json, re, subprocess, urllib.request, urllib.error, base64
+import os, sys, json, re, subprocess, urllib.request, urllib.error, base64, time
 from dotenv import load_dotenv
 from pytubefix import YouTube
 from groq import Groq
@@ -17,7 +17,7 @@ YOUTUBE_URL     = "https://www.youtube.com/watch?v=W3usaA6UwyI"
 OUTPUT_DIR      = "tmp/sayit/default"
 GROQ_MAX_BYTES  = 24 * 1024 * 1024
 CHUNK_SECONDS   = 20 * 60
-TTS_VOICE       = "en-US-Wavenet-F"
+TTS_VOICE       = "en-US-Wavenet-D"
 
 
 def _gemma_text(result):
@@ -139,13 +139,22 @@ def transcribe(audio_paths):
 
 # ── 步驟 3：Gemma 校正 + 翻譯 + 分段 ────────────────────────────────────────
 
-def _gemini_post(payload, timeout=300):
+def _gemini_post(payload, timeout=600):
     url  = (f"https://generativelanguage.googleapis.com/v1beta/"
-            f"models/gemma-3-27b-it:generateContent?key={GEMINI_API_KEY}")
+            f"models/gemini-3.1-flash-lite:generateContent?key={GEMINI_API_KEY}")
     data = json.dumps(payload).encode("utf-8")
     req  = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"})
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
-        return json.loads(resp.read().decode("utf-8"))
+    for attempt in range(3):
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                return json.loads(resp.read().decode("utf-8"))
+        except urllib.error.HTTPError as e:
+            if e.code in (429, 500, 503) and attempt < 2:
+                wait = 10 * (attempt + 1)
+                print(f"  ⚠️  HTTP {e.code}，{wait}s 後重試（{attempt+1}/2）...")
+                time.sleep(wait)
+            else:
+                raise
 
 
 def _extract_json(raw, anchor):
@@ -326,7 +335,7 @@ def _ssml_for_sents(sents, start_idx=0, leading_break=True):
 def _tts_api_call(ssml, tts_url):
     payload = {
         "input": {"ssml": ssml},
-        "voice": {"languageCode": "en-US", "name": TTS_VOICE, "ssmlGender": "FEMALE"},
+        "voice": {"languageCode": "en-US", "name": TTS_VOICE},
         "audioConfig": {"audioEncoding": "MP3", "speakingRate": 0.95},
         "enableTimePointing": ["SSML_MARK"]
     }
@@ -934,6 +943,9 @@ if __name__ == "__main__":
         if not url:
             print("未輸入 URL，使用預設影片")
             url = YOUTUBE_URL
+        gender = input("語音性別（m = 男聲, f = 女聲，預設 m）：").strip().lower()
+        TTS_VOICE = "en-US-Wavenet-F" if gender == "f" else "en-US-Wavenet-D"
+        print(f"語音：{TTS_VOICE}")
 
     # 每部影片獨立目錄（依 video ID）
     vid_id = get_video_id(url)
