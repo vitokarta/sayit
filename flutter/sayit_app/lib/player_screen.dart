@@ -81,16 +81,11 @@ class _PlayerScreenState extends State<PlayerScreen> {
   void _scrollToActive(int idx) {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      final key = _keys[idx];
-      final ctx = key.currentContext;
+      final ctx = _keys[idx].currentContext;
       if (ctx == null) return;
-      final box = ctx.findRenderObject() as RenderBox?;
-      if (box == null || !box.attached) return;
-      final viewport = RenderAbstractViewport.of(box);
-      final offset = viewport.getOffsetToReveal(box, 0.5).offset;
-      if (!_scrollController.hasClients) return;
-      _scrollController.animateTo(
-        offset.clamp(0.0, _scrollController.position.maxScrollExtent),
+      Scrollable.ensureVisible(
+        ctx,
+        alignment: 0.3,
         duration: const Duration(milliseconds: 350),
         curve: Curves.easeInOut,
       );
@@ -189,10 +184,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
       ),
       body: LayoutBuilder(
         builder: (context, constraints) {
-          final halfH = constraints.maxHeight / 2;
           return ListView.builder(
         controller: _scrollController,
-        padding: EdgeInsets.only(top: halfH, bottom: halfH),
+        padding: EdgeInsets.only(top: 8, bottom: constraints.maxHeight * 0.7),
         itemCount: allSents.length,
         itemBuilder: (_, i) {
           int si = 0, sj = 0, count = 0;
