@@ -78,27 +78,55 @@ def _get_video_title(url):
         return "video"
 
 
-def _transcribe_via_captions(vid_id):
-    """嘗試用 YouTube 自動字幕取得逐字稿，不可用則回傳 None"""
+def _poll_supadata_job(job_id, api_key):
+    req_url = f"https://api.supadata.ai/v1/transcript/{job_id}"
+    req = urllib.request.Request(req_url, headers={"x-api-key": api_key})
+    for _ in range(60):
+        time.sleep(5)
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            data = json.loads(resp.read())
+            if data.get("status") == "done":
+                return data
+            if data.get("status") == "error":
+                raise ValueError(f"Supadata job 失敗：{data}")
+    raise TimeoutError("Supadata 轉錄超時")
+
+
+def _transcribe_via_supadata(url):
+    """透過 Supadata API 取得字幕，不可用則回傳 None"""
+    api_key = os.getenv("SUPADATA_API_KEY")
+    if not api_key:
+        return None
+
     cached = _load_cache("whisper")
     if cached:
         print(f"  ⚡ 快取命中：{len(cached)} 句")
         return cached
 
     try:
-        from youtube_transcript_api import YouTubeTranscriptApi
-        entries = YouTubeTranscriptApi().fetch(
-            vid_id, languages=["zh-TW", "zh-Hant", "zh-Hans", "zh"]
-        )
+        import urllib.parse
+        req_url = (f"https://api.supadata.ai/v1/transcript"
+                   f"?url={urllib.parse.quote(url, safe='')}&lang=zh&text=false")
+        req = urllib.request.Request(req_url, headers={"x-api-key": api_key, "User-Agent": "python-requests/2.31"})
+
+        with urllib.request.urlopen(req, timeout=60) as resp:
+            status = resp.status
+            data = json.loads(resp.read())
+
+        if status == 202:
+            print(f"  ⏳ 長影片，等待 Supadata 轉錄...")
+            data = _poll_supadata_job(data["jobId"], api_key)
+
+        chunks = data.get("content", [])
         segs = [
-            {"start": e.start, "end": e.start + e.duration, "text": e.text.strip()}
-            for e in entries if e.text.strip()
+            {"start": c["offset"] / 1000, "end": (c["offset"] + c["duration"]) / 1000, "text": c["text"].strip()}
+            for c in chunks if c["text"].strip()
         ]
-        print(f"  ✅ 字幕擷取成功：{len(segs)} 句")
+        print(f"  ✅ 字幕取得成功：{len(segs)} 句（語言：{data.get('lang')}）")
         _save_cache("whisper", segs)
         return segs
     except Exception as e:
-        print(f"  ⚠️  字幕不可用：{e}")
+        print(f"  ⚠️  Supadata 失敗：{e}")
         return None
 
 
@@ -1034,7 +1062,7 @@ def run(url, voice="male"):
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
     print("\n步驟 1：取得逐字稿")
-    whisper_segs = _transcribe_via_captions(vid_id)
+    whisper_segs = _transcribe_via_supadata(url)
     if whisper_segs is not None:
         title = _get_video_title(url)
         print(f"  標題：{title}")

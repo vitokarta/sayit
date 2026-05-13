@@ -41,6 +41,8 @@ python -m uvicorn main:app --reload
 - `GOOGLE_TTS_API_KEY`
 - `SUPABASE_URL`
 - `SUPABASE_SERVICE_ROLE_KEY`
+- `SUPADATA_API_KEY` — 字幕擷取（supadata.ai，免費 100 次/月）
+- `YOUTUBE_COOKIES_B64` — yt-dlp fallback 用（選用）
 
 ## 部署
 
