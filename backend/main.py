@@ -132,7 +132,7 @@ def get_video(video_id: str):
 def _run_job(job_id: str, url: str, vid_id: str, voice: str = "male"):
     try:
         _set(job_id, "downloading")
-        vid_id, title, segments = pipeline.run(url, voice=voice)
+        vid_id, title, segments, summary = pipeline.run(url, voice=voice)
 
         _set(job_id, "uploading")
         updated_segments = _upload_audio(vid_id, segments)
@@ -141,7 +141,7 @@ def _run_job(job_id: str, url: str, vid_id: str, voice: str = "male"):
         supabase.table("videos").insert({
             "id": vid_id,
             "title": title,
-            "data": {"title": title, "segments": updated_segments}
+            "data": {"title": title, "segments": updated_segments, "summary": summary}
         }).execute()
 
         # 清除本機暫存（mp4 原始檔 + mp3 音訊，資料已在 Supabase）

@@ -26,12 +26,39 @@ class Segment {
       );
 }
 
+class SummaryTopic {
+  final String title;
+  final List<String> points;
+
+  SummaryTopic({required this.title, required this.points});
+
+  factory SummaryTopic.fromJson(Map<String, dynamic> j) => SummaryTopic(
+        title: j['title'] as String,
+        points: (j['points'] as List).map((p) => p as String).toList(),
+      );
+}
+
+class Summary {
+  final String overview;
+  final List<SummaryTopic> topics;
+
+  Summary({required this.overview, required this.topics});
+
+  factory Summary.fromJson(Map<String, dynamic> j) => Summary(
+        overview: j['overview'] as String,
+        topics: (j['topics'] as List)
+            .map((t) => SummaryTopic.fromJson(t as Map<String, dynamic>))
+            .toList(),
+      );
+}
+
 class Video {
   final String id;
   final String title;
   final List<Segment> segments;
+  final Summary? summary;
 
-  Video({required this.id, required this.title, required this.segments});
+  Video({required this.id, required this.title, required this.segments, this.summary});
 
   factory Video.fromJson(Map<String, dynamic> j) {
     final data = j['data'] as Map<String, dynamic>;
@@ -41,6 +68,9 @@ class Video {
       segments: (data['segments'] as List)
           .map((s) => Segment.fromJson(s as Map<String, dynamic>))
           .toList(),
+      summary: data['summary'] != null
+          ? Summary.fromJson(data['summary'] as Map<String, dynamic>)
+          : null,
     );
   }
 }

@@ -1074,15 +1074,16 @@ def run(url, voice="male"):
         whisper_segs = transcribe(audio_paths)
 
     segments           = process_with_gemma(title, whisper_segs)
+    summary            = generate_summary(title, segments)
     segments           = tts_segments(segments)
 
-    html = generate_html(title, segments)
+    html = generate_html(title, segments, summary)
     with open(os.path.join(OUTPUT_DIR, "player.html"), "w", encoding="utf-8") as f:
         f.write(html)
     with open(os.path.join(OUTPUT_DIR, "data.json"), "w", encoding="utf-8") as f:
-        json.dump({"title": title, "segments": segments}, f, ensure_ascii=False, indent=2)
+        json.dump({"title": title, "segments": segments, "summary": summary}, f, ensure_ascii=False, indent=2)
 
-    return vid_id, title, segments
+    return vid_id, title, segments, summary
 
 
 if __name__ == "__main__":

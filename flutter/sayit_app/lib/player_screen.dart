@@ -17,6 +17,7 @@ Map<String, String> get _authHeaders => {
 };
 
 enum _Phase { idle, prompting, ready, recording, evaluating, done }
+enum _Mode { listen, practice, summary }
 
 class PlayerScreen extends StatefulWidget {
   final Video video;
@@ -38,8 +39,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
   final List<GlobalKey> _keys = [];
   final _listKey = GlobalKey();
 
-  // ── practice ───────────────────────────────────────────────────────────────
-  bool _practiceMode = false;
+  // ── mode ───────────────────────────────────────────────────────────────────
+  _Mode _mode = _Mode.listen;
+  bool get _practiceMode => _mode == _Mode.practice;
   final _speech = SpeechToText();
   final _tts = FlutterTts();
   bool _speechReady = false;
@@ -287,28 +289,33 @@ class _PlayerScreenState extends State<PlayerScreen> {
           child: Padding(
             padding: const EdgeInsets.only(left: 16, bottom: 8),
             child: Row(children: [
-              SegmentedButton<bool>(
+              SegmentedButton<_Mode>(
                 style: SegmentedButton.styleFrom(
                   visualDensity: VisualDensity.compact,
                   textStyle: const TextStyle(fontSize: 12),
                 ),
                 segments: const [
                   ButtonSegment(
-                    value: false,
+                    value: _Mode.listen,
                     icon: Icon(Icons.hearing, size: 14),
                     label: Text('聆聽'),
                   ),
                   ButtonSegment(
-                    value: true,
+                    value: _Mode.practice,
                     icon: Icon(Icons.mic, size: 14),
                     label: Text('練習'),
                   ),
+                  ButtonSegment(
+                    value: _Mode.summary,
+                    icon: Icon(Icons.article_outlined, size: 14),
+                    label: Text('摘要'),
+                  ),
                 ],
-                selected: {_practiceMode},
+                selected: {_mode},
                 onSelectionChanged: (s) {
                   final newMode = s.first;
-                  if (!newMode && _phase != _Phase.idle) _cancelPractice();
-                  setState(() => _practiceMode = newMode);
+                  if (newMode != _Mode.practice && _phase != _Phase.idle) _cancelPractice();
+                  setState(() => _mode = newMode);
                 },
               ),
             ]),
@@ -410,8 +417,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
           },
         ),
       ),
-      // ── 句子列表 + 練習面板 ────────────────────────────────────────────────
-      body: Column(
+      // ── 句子列表 + 練習面板 + 摘要 ────────────────────────────────────────────
+      body: _mode == _Mode.summary
+          ? _buildSummaryView()
+          : Column(
         children: [
           Expanded(
             child: LayoutBuilder(
@@ -486,6 +495,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
           if (_practiceMode && _phase != _Phase.idle) _buildPracticePanel(),
         ],
       ),
+
     );
   }
 
@@ -728,4 +738,94 @@ class _PlayerScreenState extends State<PlayerScreen> {
           ],
         ),
       );
+
+  // ── Summary view ───────────────────────────────────────────────────────────
+
+  Widget _buildSummaryView() {
+    final cs = Theme.of(context).colorScheme;
+    final summary = widget.video.summary;
+
+    if (summary == null) {
+      return Center(
+        child: Text('此影片無摘要',
+            style: TextStyle(color: cs.onSurface.withValues(alpha: 0.4))),
+      );
+    }
+
+    return ListView(
+      padding: const EdgeInsets.all(16),
+      children: [
+        Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: cs.surfaceContainerHigh,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: cs.outlineVariant),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('影片概述',
+                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                        color: cs.primary,
+                        letterSpacing: 0.6,
+                      )),
+              const SizedBox(height: 8),
+              Text(summary.overview,
+                  style: TextStyle(fontSize: 14, color: cs.onSurface, height: 1.7)),
+            ],
+          ),
+        ),
+        const SizedBox(height: 12),
+        ...summary.topics.map((topic) => Padding(
+              padding: const EdgeInsets.only(bottom: 10),
+              child: Container(
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: cs.surfaceContainerHigh,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: cs.outlineVariant),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(topic.title,
+                        style: TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600,
+                            color: cs.primary)),
+                    const SizedBox(height: 8),
+                    ...topic.points.map((p) => Padding(
+                          padding: const EdgeInsets.only(bottom: 6),
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Padding(
+                                padding: const EdgeInsets.only(top: 6, right: 8),
+                                child: Container(
+                                  width: 6,
+                                  height: 6,
+                                  decoration: BoxDecoration(
+                                    color: cs.primary.withValues(alpha: 0.7),
+                                    shape: BoxShape.circle,
+                                  ),
+                                ),
+                              ),
+                              Expanded(
+                                child: Text(p,
+                                    style: TextStyle(
+                                        fontSize: 13,
+                                        color: cs.onSurface,
+                                        height: 1.6)),
+                              ),
+                            ],
+                          ),
+                        )),
+                  ],
+                ),
+              ),
+            )),
+      ],
+    );
+  }
 }
