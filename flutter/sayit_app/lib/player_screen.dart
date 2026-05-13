@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:just_audio/just_audio.dart';
 import 'models.dart';
 
@@ -78,31 +79,33 @@ class _PlayerScreenState extends State<PlayerScreen> {
   }
 
   void _scrollToActive(int idx) {
-    final key = _keys[idx];
-    final ctx = key.currentContext;
-    if (ctx == null) return;
-    final box = ctx.findRenderObject() as RenderBox?;
-    if (box == null) return;
-    final itemOffset = box.localToGlobal(Offset.zero).dy;
-    final itemHeight = box.size.height;
-    final screenHeight = MediaQuery.of(ctx).size.height;
-    final currentScroll = _scrollController.offset;
-    // 目標：讓 item 中心對齊畫面中心
-    final target = currentScroll + itemOffset - (screenHeight / 2) + (itemHeight / 2);
-    _scrollController.animateTo(
-      target.clamp(0.0, _scrollController.position.maxScrollExtent),
-      duration: const Duration(milliseconds: 350),
-      curve: Curves.easeInOut,
-    );
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final key = _keys[idx];
+      final ctx = key.currentContext;
+      if (ctx == null) return;
+      final box = ctx.findRenderObject() as RenderBox?;
+      if (box == null || !box.attached) return;
+      final viewport = RenderAbstractViewport.of(box);
+      final offset = viewport.getOffsetToReveal(box, 0.5).offset;
+      if (!_scrollController.hasClients) return;
+      _scrollController.animateTo(
+        offset.clamp(0.0, _scrollController.position.maxScrollExtent),
+        duration: const Duration(milliseconds: 350),
+        curve: Curves.easeInOut,
+      );
+    });
   }
 
-  void _jumpTo(int segIdx, int sentIdx) {
+  void _jumpTo(int segIdx, int sentIdx, int globalIdx) {
     if (segIdx != _segIdx) {
       _playSegment(segIdx);
     }
     final seg = widget.video.segments[segIdx];
     final secs = seg.sentences[sentIdx].ttsStart;
     _player.seek(Duration(milliseconds: (secs * 1000).round()));
+    setState(() => _activeIdx = globalIdx);
+    _scrollToActive(globalIdx);
   }
 
   void _rewind10() {
@@ -184,9 +187,12 @@ class _PlayerScreenState extends State<PlayerScreen> {
           ),
         ],
       ),
-      body: ListView.builder(
+      body: LayoutBuilder(
+        builder: (context, constraints) {
+          final halfH = constraints.maxHeight / 2;
+          return ListView.builder(
         controller: _scrollController,
-        padding: const EdgeInsets.symmetric(vertical: 8),
+        padding: EdgeInsets.only(top: halfH, bottom: halfH),
         itemCount: allSents.length,
         itemBuilder: (_, i) {
           int si = 0, sj = 0, count = 0;
@@ -205,7 +211,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
           return GestureDetector(
             key: key,
-            onTap: () => _jumpTo(si, sj),
+            onTap: () => _jumpTo(si, sj, i),
             child: AnimatedContainer(
               duration: const Duration(milliseconds: 200),
               margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
@@ -245,6 +251,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
                 ],
               ),
             ),
+          );
+        },
           );
         },
       ),
