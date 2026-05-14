@@ -46,11 +46,12 @@ class _PlayerScreenState extends State<PlayerScreen> {
   final _tts = FlutterTts();
   bool _speechReady = false;
   _Phase _phase = _Phase.idle;
-  int _practiceSeg = -1;
+  int _practiceSeg = 0;
   String _transcript = '';
   Map<String, dynamic>? _feedback;
   String? _feedbackError;
   bool _feedbackPending = false;
+  final Set<int> _expandedCorrections = {};
 
   @override
   void initState() {
@@ -180,6 +181,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
     setState(() {
       _phase = _Phase.idle;
       _feedbackPending = false;
+      _transcript = '';
+      _feedback = null;
+      _feedbackError = null;
+      _expandedCorrections.clear();
     });
   }
 
@@ -194,11 +199,11 @@ class _PlayerScreenState extends State<PlayerScreen> {
       return;
     }
     setState(() {
-      _practiceSeg = _segIdx;
       _transcript = '';
       _feedback = null;
       _feedbackError = null;
       _feedbackPending = false;
+      _expandedCorrections.clear();
       _phase = _Phase.recording;
     });
     await _speech.listen(
@@ -214,11 +219,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
   void _stopRecording() {
     _speech.stop();
-    if (_transcript.isNotEmpty) {
-      _doSubmitFeedback();
-    } else {
-      setState(() => _phase = _Phase.ready);
-    }
+    setState(() => _phase = _Phase.ready);
   }
 
   void _doSubmitFeedback() {
@@ -389,8 +390,20 @@ class _PlayerScreenState extends State<PlayerScreen> {
                       value: progress,
                       onChanged: (v) {
                         if (dur == Duration.zero) return;
-                        _player.seek(Duration(
-                            milliseconds: (v * dur.inMilliseconds).round()));
+                        final ms = (v * dur.inMilliseconds).round();
+                        _player.seek(Duration(milliseconds: ms));
+                        // 即時更新字幕（不等 positionStream）
+                        final secs = ms / 1000.0;
+                        final seg = widget.video.segments[_segIdx];
+                        int active = 0;
+                        for (var i = 0; i < seg.sentences.length; i++) {
+                          if (secs >= seg.sentences[i].ttsStart) active = i;
+                        }
+                        final g = _globalOffset(_segIdx) + active;
+                        if (g != _activeIdx) {
+                          setState(() => _activeIdx = g);
+                          _scrollToActive(g);
+                        }
                       },
                     ),
                   ),
@@ -519,10 +532,35 @@ class _PlayerScreenState extends State<PlayerScreen> {
                 ),
               ),
             ),
-            const SizedBox(height: 10),
-            Text(
-              '段落 ${_practiceSeg + 1} 練習',
-              style: Theme.of(context).textTheme.labelMedium?.copyWith(color: cs.primary),
+            const SizedBox(height: 8),
+            // 段落選擇器
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children: List.generate(widget.video.segments.length, (i) =>
+                  Padding(
+                    padding: const EdgeInsets.only(right: 6),
+                    child: ChoiceChip(
+                      label: Text('段落 ${i + 1}',
+                          style: const TextStyle(fontSize: 12)),
+                      selected: _practiceSeg == i,
+                      visualDensity: VisualDensity.compact,
+                      onSelected: (_) {
+                        if (_phase == _Phase.recording) _speech.cancel();
+                        setState(() {
+                          _practiceSeg = i;
+                          _phase = _Phase.idle;
+                          _transcript = '';
+                          _feedback = null;
+                          _feedbackError = null;
+                          _feedbackPending = false;
+                          _expandedCorrections.clear();
+                        });
+                      },
+                    ),
+                  ),
+                ),
+              ),
             ),
             const SizedBox(height: 12),
             _buildPhaseContent(),
@@ -536,20 +574,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
     final cs = Theme.of(context).colorScheme;
     switch (_phase) {
       case _Phase.idle:
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('段落 ${_segIdx + 1} 口說練習',
-                style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                    color: cs.onSurface.withValues(alpha: 0.5))),
-            const SizedBox(height: 10),
-            FilledButton.icon(
-              onPressed: _startRecording,
-              icon: const Icon(Icons.mic, size: 18),
-              label: const Text('開始錄音'),
-            ),
-          ],
-        );
       case _Phase.prompting:
         return FilledButton.icon(
           onPressed: _startRecording,
@@ -557,10 +581,38 @@ class _PlayerScreenState extends State<PlayerScreen> {
           label: const Text('開始錄音'),
         );
       case _Phase.ready:
-        return FilledButton.icon(
-          onPressed: _startRecording,
-          icon: const Icon(Icons.mic, size: 18),
-          label: const Text('開始錄音'),
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (_transcript.isNotEmpty) ...[
+              _fbLabel('你說的'),
+              const SizedBox(height: 4),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: cs.surfaceContainer,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(_transcript, style: const TextStyle(fontSize: 13)),
+              ),
+              const SizedBox(height: 10),
+            ],
+            Row(children: [
+              OutlinedButton.icon(
+                onPressed: _startRecording,
+                icon: const Icon(Icons.refresh, size: 16),
+                label: const Text('重新錄音'),
+              ),
+              const SizedBox(width: 8),
+              if (_transcript.isNotEmpty)
+                FilledButton.icon(
+                  onPressed: _doSubmitFeedback,
+                  icon: const Icon(Icons.send, size: 16),
+                  label: const Text('送出批改'),
+                ),
+            ]),
+          ],
         );
       case _Phase.recording:
         return Column(
@@ -626,24 +678,95 @@ class _PlayerScreenState extends State<PlayerScreen> {
                   style: const TextStyle(color: Colors.red, fontSize: 12)),
             if (_feedback != null) ..._buildFeedback(_feedback!),
             const SizedBox(height: 12),
-            SizedBox(
-              width: double.infinity,
-              child: _practiceSeg + 1 < widget.video.segments.length
-                  ? FilledButton(
-                      onPressed: () {
-                        setState(() => _phase = _Phase.idle);
-                        _playSegment(_practiceSeg + 1);
-                      },
-                      child: const Text('下一段 →'),
-                    )
-                  : OutlinedButton(
-                      onPressed: () => setState(() => _phase = _Phase.idle),
-                      child: const Text('完成'),
-                    ),
-            ),
+            Row(children: [
+              OutlinedButton.icon(
+                onPressed: () => setState(() {
+                  _phase = _Phase.idle;
+                  _transcript = '';
+                  _feedback = null;
+                  _feedbackError = null;
+                  _feedbackPending = false;
+                  _expandedCorrections.clear();
+                }),
+                icon: const Icon(Icons.refresh, size: 16),
+                label: const Text('再試一次'),
+              ),
+              const SizedBox(width: 8),
+              if (_practiceSeg + 1 < widget.video.segments.length)
+                FilledButton(
+                  onPressed: () {
+                    setState(() {
+                      _practiceSeg = _practiceSeg + 1;
+                      _phase = _Phase.idle;
+                      _transcript = '';
+                      _feedback = null;
+                      _feedbackPending = false;
+                      _expandedCorrections.clear();
+                    });
+                  },
+                  child: const Text('下一段 →'),
+                ),
+            ]),
           ],
         );
     }
+  }
+
+  // 把修正後英文中的 [N] 換成可點擊的 chip，點擊展開/收合對應說明
+  List<InlineSpan> _correctedSpans(String text, List corrections) {
+    final cs = Theme.of(context).colorScheme;
+    final spans = <InlineSpan>[];
+    final regex = RegExp(r'\[(\d+)\]');
+    int lastEnd = 0;
+    for (final match in regex.allMatches(text)) {
+      if (match.start > lastEnd) {
+        spans.add(TextSpan(
+          text: text.substring(lastEnd, match.start),
+          style: TextStyle(fontSize: 13, color: cs.onSurface),
+        ));
+      }
+      final idx = int.parse(match.group(1)!) - 1;
+      final expanded = _expandedCorrections.contains(idx);
+      spans.add(WidgetSpan(
+        alignment: PlaceholderAlignment.middle,
+        child: GestureDetector(
+          onTap: () => setState(() {
+            if (expanded) {
+              _expandedCorrections.remove(idx);
+            } else {
+              _expandedCorrections.add(idx);
+            }
+          }),
+          child: Container(
+            margin: const EdgeInsets.symmetric(horizontal: 2),
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+            decoration: BoxDecoration(
+              color: expanded
+                  ? cs.primary
+                  : cs.primary.withValues(alpha: 0.15),
+              borderRadius: BorderRadius.circular(4),
+              border: Border.all(color: cs.primary.withValues(alpha: 0.4)),
+            ),
+            child: Text(
+              '[${idx + 1}]',
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.bold,
+                color: expanded ? cs.onPrimary : cs.primary,
+              ),
+            ),
+          ),
+        ),
+      ));
+      lastEnd = match.end;
+    }
+    if (lastEnd < text.length) {
+      spans.add(TextSpan(
+        text: text.substring(lastEnd),
+        style: TextStyle(fontSize: 13, color: cs.onSurface),
+      ));
+    }
+    return spans;
   }
 
   List<Widget> _buildFeedback(Map<String, dynamic> fb) {
@@ -655,69 +778,76 @@ class _PlayerScreenState extends State<PlayerScreen> {
     final summary = fb['summary'] as String? ?? '';
 
     return [
-      _fbSection('修正後英文', corrected, cs.onSurface),
+      // 修正後英文（含可點擊的 [N] 標記）
+      Padding(
+        padding: const EdgeInsets.only(bottom: 10),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _fbLabel('修正後英文'),
+            const SizedBox(height: 4),
+            RichText(
+              text: TextSpan(children: _correctedSpans(corrected, corrections)),
+            ),
+            // 展開的修正說明（inline，緊接在修正後英文下方）
+            if (corrections.isNotEmpty) ...[
+              const SizedBox(height: 6),
+              ...List.generate(corrections.length, (idx) {
+                if (!_expandedCorrections.contains(idx)) return const SizedBox.shrink();
+                final m = corrections[idx] as Map;
+                return Container(
+                  margin: const EdgeInsets.only(bottom: 6),
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: cs.surfaceContainer,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border(left: BorderSide(color: cs.primary, width: 3)),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      RichText(
+                        text: TextSpan(
+                          style: TextStyle(fontSize: 13, color: cs.onSurface),
+                          children: [
+                            TextSpan(
+                              text: '"${m['original']}"  ',
+                              style: const TextStyle(
+                                color: Color(0xFFE57373),
+                                decoration: TextDecoration.lineThrough,
+                              ),
+                            ),
+                            const TextSpan(text: '→  '),
+                            TextSpan(
+                              text: '"${m['corrected']}"',
+                              style: const TextStyle(
+                                color: Color(0xFF81C784),
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        m['reason'] as String? ?? '',
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: cs.onSurface.withValues(alpha: 0.6),
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              }),
+            ],
+          ],
+        ),
+      ),
       if (translationZh.isNotEmpty)
         _fbSection('中文翻譯', translationZh, cs.onSurface.withValues(alpha: 0.7)),
       if (missingPoints != null && missingPoints.toString() != 'null')
-        _fbSection('遺漏重點', missingPoints.toString(), const Color(0xFFE0C060)),
-      if (corrections.isNotEmpty) ...[
-        const SizedBox(height: 4),
-        _fbLabel('修正說明'),
-        const SizedBox(height: 6),
-        ...corrections.map((c) {
-          final m = c as Map;
-          return Padding(
-            padding: const EdgeInsets.only(bottom: 6),
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-              decoration: BoxDecoration(
-                color: cs.surfaceContainer,
-                borderRadius: BorderRadius.circular(8),
-                border: Border(left: BorderSide(color: cs.primary, width: 3)),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  RichText(
-                    text: TextSpan(
-                      style: TextStyle(fontSize: 13, color: cs.onSurface),
-                      children: [
-                        TextSpan(
-                          text: '[${m['id']}] ',
-                          style: TextStyle(color: cs.primary, fontWeight: FontWeight.bold),
-                        ),
-                        TextSpan(
-                          text: '"${m['original']}"  ',
-                          style: const TextStyle(
-                            color: Colors.redAccent,
-                            decoration: TextDecoration.lineThrough,
-                          ),
-                        ),
-                        const TextSpan(text: '→  '),
-                        TextSpan(
-                          text: '"${m['corrected']}"',
-                          style: const TextStyle(
-                            color: Colors.lightGreenAccent,
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    m['reason'] as String? ?? '',
-                    style: TextStyle(
-                      fontSize: 11,
-                      color: cs.onSurface.withValues(alpha: 0.6),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          );
-        }),
-      ],
+        _fbSection('遺漏重點', missingPoints.toString(), const Color(0xFFFFCA28)),
       if (summary.isNotEmpty)
         _fbSection('整體建議', summary, cs.onSurface.withValues(alpha: 0.75)),
     ];
