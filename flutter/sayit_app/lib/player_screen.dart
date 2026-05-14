@@ -92,13 +92,13 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
   Future<void> _playSegment(int idx, {Duration? seekTo}) async {
     if (idx >= widget.video.segments.length) return;
+    _posSub?.cancel();   // 立即取消，避免舊 stream 覆蓋 _activeIdx
+    _posSub = null;
     setState(() => _segIdx = idx);
     final seg = widget.video.segments[idx];
     await _player.setUrl(seg.audioUrl);
     await _player.setSpeed(_speed);
     if (seekTo != null) await _player.seek(seekTo);
-
-    _posSub?.cancel();
     _posSub = _player.positionStream.listen((pos) {
       final secs = pos.inMilliseconds / 1000.0;
       final sents = seg.sentences;
@@ -113,7 +113,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
       }
     });
 
-    _stateSub?.cancel();
+    _stateSub?.cancel();   // 同上，提前取消避免舊的觸發 _playSegment
     _stateSub = _player.playerStateStream.listen((state) {
       if (state.processingState == ProcessingState.completed) {
         _playSegment(idx + 1);
