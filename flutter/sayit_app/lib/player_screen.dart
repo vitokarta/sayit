@@ -38,7 +38,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
   final _scrollController = ScrollController();
   final List<GlobalKey> _keys = [];
   final _listKey = GlobalKey();
-  late final List<List<int>> _sentMap; // [segIdx, sentIdx] per global index
 
   // ── mode ───────────────────────────────────────────────────────────────────
   _Mode _mode = _Mode.listen;
@@ -57,12 +56,12 @@ class _PlayerScreenState extends State<PlayerScreen> {
   @override
   void initState() {
     super.initState();
-    _sentMap = [];
-    for (var s = 0; s < widget.video.segments.length; s++) {
-      for (var j = 0; j < widget.video.segments[s].sentences.length; j++) {
-        _keys.add(GlobalKey());
-        _sentMap.add([s, j]);
-      }
+    // 只需要和最長段落等長的 keys（所有段落共用，切換段落時 Flutter 會重新對應）
+    final maxLen = widget.video.segments
+        .map((s) => s.sentences.length)
+        .reduce((a, b) => a > b ? a : b);
+    for (var i = 0; i < maxLen; i++) {
+      _keys.add(GlobalKey());
     }
     _initSpeechAndTts();
     _playSegment(0);
@@ -79,16 +78,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
     });
   }
 
-  List<Sentence> get _allSentences =>
-      widget.video.segments.expand((s) => s.sentences).toList();
-
-  int _globalOffset(int segIdx) {
-    int offset = 0;
-    for (var i = 0; i < segIdx; i++) {
-      offset += widget.video.segments[i].sentences.length;
-    }
-    return offset;
-  }
 
   Future<void> _playSegment(int idx, {Duration? seekTo}) async {
     if (idx >= widget.video.segments.length) return;
@@ -106,10 +95,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
       for (var i = 0; i < sents.length; i++) {
         if (secs >= sents[i].ttsStart) active = i;
       }
-      final globalActive = _globalOffset(idx) + active;
-      if (globalActive != _activeIdx) {
-        setState(() => _activeIdx = globalActive);
-        _scrollToActive(globalActive);
+      if (active != _activeIdx) {
+        setState(() => _activeIdx = active);
+        _scrollToActive(active);
       }
     });
 
@@ -146,7 +134,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     });
   }
 
-  void _jumpTo(int segIdx, int sentIdx, int globalIdx) {
+  void _jumpTo(int segIdx, int sentIdx) {
     if (_practiceMode && _phase != _Phase.idle) _cancelPractice();
     final secs = widget.video.segments[segIdx].sentences[sentIdx].ttsStart;
     final seekTo = Duration(milliseconds: (secs * 1000).round());
@@ -155,8 +143,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
     } else {
       _player.seek(seekTo);
     }
-    setState(() => _activeIdx = globalIdx);
-    _scrollToActive(globalIdx);
+    setState(() => _activeIdx = sentIdx);
+    _scrollToActive(sentIdx);
   }
 
   void _rewind10() {
@@ -215,8 +203,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
         setState(() => _transcript = result.recognizedWords);
       },
       listenFor: const Duration(seconds: 120),
-      pauseFor: const Duration(seconds: 8),
+      pauseFor: const Duration(seconds: 10),
       localeId: 'en-US',
+      listenOptions: SpeechListenOptions(listenMode: ListenMode.dictation),
     );
   }
 
@@ -276,7 +265,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final allSents = _allSentences;
+    final sents = widget.video.segments[_segIdx].sentences;
     final totalSegs = widget.video.segments.length;
 
     return Scaffold(
@@ -397,15 +386,14 @@ class _PlayerScreenState extends State<PlayerScreen> {
                         _player.seek(Duration(milliseconds: ms));
                         // 即時更新字幕（不等 positionStream）
                         final secs = ms / 1000.0;
-                        final seg = widget.video.segments[_segIdx];
+                        final segSents = widget.video.segments[_segIdx].sentences;
                         int active = 0;
-                        for (var i = 0; i < seg.sentences.length; i++) {
-                          if (secs >= seg.sentences[i].ttsStart) active = i;
+                        for (var i = 0; i < segSents.length; i++) {
+                          if (secs >= segSents[i].ttsStart) active = i;
                         }
-                        final g = _globalOffset(_segIdx) + active;
-                        if (g != _activeIdx) {
-                          setState(() => _activeIdx = g);
-                          _scrollToActive(g);
+                        if (active != _activeIdx) {
+                          setState(() => _activeIdx = active);
+                          _scrollToActive(active);
                         }
                       },
                     ),
@@ -452,10 +440,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
                       setState(() {
                         _practiceSeg = i;
                         _phase = _Phase.idle;
-                        _activeIdx = _globalOffset(i);
+                        _activeIdx = 0;
                       });
                       _playSegment(i);
-                      _scrollToActive(_globalOffset(i));
                     },
                   ),
                 ),
@@ -472,14 +459,12 @@ class _PlayerScreenState extends State<PlayerScreen> {
                       ? 8
                       : constraints.maxHeight * 0.7,
                 ),
-                children: List.generate(allSents.length, (i) {
-                  final si = _sentMap[i][0];
-                  final sj = _sentMap[i][1];
-                  final sent = allSents[i];
+                children: List.generate(sents.length, (i) {
+                  final sent = sents[i];
                   final isActive = i == _activeIdx;
                   return GestureDetector(
                     key: _keys[i],
-                    onTap: () => _jumpTo(si, sj, i),
+                    onTap: () => _jumpTo(_segIdx, i),
                     child: AnimatedContainer(
                       duration: const Duration(milliseconds: 200),
                       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
