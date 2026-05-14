@@ -429,6 +429,35 @@ class _PlayerScreenState extends State<PlayerScreen> {
           ? _buildSummaryView()
           : Column(
         children: [
+          // 段落選擇列
+          if (totalSegs > 1)
+            SizedBox(
+              height: 40,
+              child: ListView.builder(
+                scrollDirection: Axis.horizontal,
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                itemCount: totalSegs,
+                itemBuilder: (_, i) => Padding(
+                  padding: const EdgeInsets.only(right: 6),
+                  child: ChoiceChip(
+                    label: Text('段落 ${i + 1}',
+                        style: const TextStyle(fontSize: 12)),
+                    selected: _segIdx == i,
+                    visualDensity: VisualDensity.compact,
+                    onSelected: (_) {
+                      if (_phase == _Phase.recording) _speech.cancel();
+                      setState(() {
+                        _practiceSeg = i;
+                        _phase = _Phase.idle;
+                        _activeIdx = _globalOffset(i);
+                      });
+                      _playSegment(i);
+                      _scrollToActive(_globalOffset(i));
+                    },
+                  ),
+                ),
+              ),
+            ),
           Expanded(
             child: LayoutBuilder(
               builder: (context, constraints) => ListView.builder(
@@ -532,37 +561,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                 ),
               ),
             ),
-            const SizedBox(height: 8),
-            // 段落選擇器
-            SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: Row(
-                children: List.generate(widget.video.segments.length, (i) =>
-                  Padding(
-                    padding: const EdgeInsets.only(right: 6),
-                    child: ChoiceChip(
-                      label: Text('段落 ${i + 1}',
-                          style: const TextStyle(fontSize: 12)),
-                      selected: _practiceSeg == i,
-                      visualDensity: VisualDensity.compact,
-                      onSelected: (_) {
-                        if (_phase == _Phase.recording) _speech.cancel();
-                        setState(() {
-                          _practiceSeg = i;
-                          _phase = _Phase.idle;
-                          _transcript = '';
-                          _feedback = null;
-                          _feedbackError = null;
-                          _feedbackPending = false;
-                          _expandedCorrections.clear();
-                        });
-                      },
-                    ),
-                  ),
-                ),
-              ),
-            ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 10),
             _buildPhaseContent(),
           ],
         ),
