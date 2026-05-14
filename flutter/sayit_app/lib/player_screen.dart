@@ -112,11 +112,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _stateSub?.cancel();
     _stateSub = _player.playerStateStream.listen((state) {
       if (state.processingState == ProcessingState.completed) {
-        if (_practiceMode) {
-          _triggerPractice(idx);
-        } else {
-          _playSegment(idx + 1);
-        }
+        _playSegment(idx + 1);
       }
     });
 
@@ -187,17 +183,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     });
   }
 
-  void _triggerPractice(int segIdx) {
-    setState(() {
-      _practiceSeg = segIdx;
-      _phase = _Phase.prompting;
-      _transcript = '';
-      _feedback = null;
-      _feedbackError = null;
-      _feedbackPending = false;
-    });
-    _tts.speak('Now try to describe what you heard.');
-  }
+
 
   Future<void> _startRecording() async {
     if (!_speechReady) {
@@ -207,13 +193,21 @@ class _PlayerScreenState extends State<PlayerScreen> {
       });
       return;
     }
-    setState(() => _phase = _Phase.recording);
+    setState(() {
+      _practiceSeg = _segIdx;
+      _transcript = '';
+      _feedback = null;
+      _feedbackError = null;
+      _feedbackPending = false;
+      _phase = _Phase.recording;
+    });
     await _speech.listen(
       onResult: (result) {
         if (!mounted) return;
         setState(() => _transcript = result.recognizedWords);
       },
       listenFor: const Duration(seconds: 120),
+      pauseFor: const Duration(seconds: 8),
       localeId: 'en-US',
     );
   }
@@ -492,7 +486,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
               ),
             ),
           ),
-          if (_practiceMode && _phase != _Phase.idle) _buildPracticePanel(),
+          if (_practiceMode) _buildPracticePanel(),
         ],
       ),
 
@@ -542,16 +536,26 @@ class _PlayerScreenState extends State<PlayerScreen> {
     final cs = Theme.of(context).colorScheme;
     switch (_phase) {
       case _Phase.idle:
-        return const SizedBox.shrink();
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('段落 ${_segIdx + 1} 口說練習',
+                style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                    color: cs.onSurface.withValues(alpha: 0.5))),
+            const SizedBox(height: 10),
+            FilledButton.icon(
+              onPressed: _startRecording,
+              icon: const Icon(Icons.mic, size: 18),
+              label: const Text('開始錄音'),
+            ),
+          ],
+        );
       case _Phase.prompting:
-        return Row(children: [
-          SizedBox(
-            width: 14, height: 14,
-            child: CircularProgressIndicator(strokeWidth: 2, color: cs.secondary),
-          ),
-          const SizedBox(width: 10),
-          const Text('提示播放中...'),
-        ]);
+        return FilledButton.icon(
+          onPressed: _startRecording,
+          icon: const Icon(Icons.mic, size: 18),
+          label: const Text('開始錄音'),
+        );
       case _Phase.ready:
         return FilledButton.icon(
           onPressed: _startRecording,
@@ -753,6 +757,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     }
 
     return ListView(
+      physics: const ClampingScrollPhysics(),
       padding: const EdgeInsets.all(16),
       children: [
         Container(
