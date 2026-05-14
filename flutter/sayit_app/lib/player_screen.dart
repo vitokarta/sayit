@@ -361,7 +361,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
         ],
       ),
       // ── 進度條 ──────────────────────────────────────────────────────────────
-      bottomNavigationBar: StreamBuilder<Duration?>(
+      bottomNavigationBar: _mode == _Mode.summary ? null : StreamBuilder<Duration?>(
         stream: _player.durationStream,
         builder: (_, durSnap) => StreamBuilder<Duration>(
           stream: _player.positionStream,
@@ -756,7 +756,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
       );
     }
 
-    return ListView(
+    return ScrollConfiguration(
+      behavior: ScrollConfiguration.of(context).copyWith(overscroll: false),
+      child: ListView(
       physics: const ClampingScrollPhysics(),
       padding: const EdgeInsets.all(16),
       children: [
@@ -831,6 +833,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
               ),
             )),
       ],
-    );
+    ));
   }
 }
