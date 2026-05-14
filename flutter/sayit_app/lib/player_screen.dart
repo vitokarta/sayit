@@ -38,6 +38,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
   final _scrollController = ScrollController();
   final List<GlobalKey> _keys = [];
   final _listKey = GlobalKey();
+  late final List<List<int>> _sentMap; // [segIdx, sentIdx] per global index
 
   // ── mode ───────────────────────────────────────────────────────────────────
   _Mode _mode = _Mode.listen;
@@ -56,9 +57,11 @@ class _PlayerScreenState extends State<PlayerScreen> {
   @override
   void initState() {
     super.initState();
-    for (final seg in widget.video.segments) {
-      for (var _ in seg.sentences) {
+    _sentMap = [];
+    for (var s = 0; s < widget.video.segments.length; s++) {
+      for (var j = 0; j < widget.video.segments[s].sentences.length; j++) {
         _keys.add(GlobalKey());
+        _sentMap.add([s, j]);
       }
     }
     _initSpeechAndTts();
@@ -460,7 +463,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
             ),
           Expanded(
             child: LayoutBuilder(
-              builder: (context, constraints) => ListView.builder(
+              builder: (context, constraints) => ListView(
                 key: _listKey,
                 controller: _scrollController,
                 padding: EdgeInsets.only(
@@ -469,21 +472,11 @@ class _PlayerScreenState extends State<PlayerScreen> {
                       ? 8
                       : constraints.maxHeight * 0.7,
                 ),
-                itemCount: allSents.length,
-                itemBuilder: (_, i) {
-                  int si = 0, sj = 0, count = 0;
-                  for (var s = 0; s < widget.video.segments.length; s++) {
-                    final len = widget.video.segments[s].sentences.length;
-                    if (count + len > i) {
-                      si = s;
-                      sj = i - count;
-                      break;
-                    }
-                    count += len;
-                  }
+                children: List.generate(allSents.length, (i) {
+                  final si = _sentMap[i][0];
+                  final sj = _sentMap[i][1];
                   final sent = allSents[i];
                   final isActive = i == _activeIdx;
-
                   return GestureDetector(
                     key: _keys[i],
                     onTap: () => _jumpTo(si, sj, i),
@@ -524,7 +517,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                       ),
                     ),
                   );
-                },
+                }),
               ),
             ),
           ),
