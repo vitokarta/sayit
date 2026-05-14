@@ -104,14 +104,18 @@ def feedback(req: FeedbackRequest):
 
     result = pipeline._gemini_post({
         "contents": [{"parts": [{"text": prompt}]}],
-        "generationConfig": {"temperature": 0.3, "maxOutputTokens": 2048}
+        "generationConfig": {
+            "temperature": 0.3,
+            "maxOutputTokens": 4096,
+            "thinkingConfig": {"thinkingBudget": 0}
+        }
     })
     raw = pipeline._gemma_text(result)
-    start = raw.find("{")
-    end = raw.rfind("}") + 1
-    if start == -1 or end == 0:
+    try:
+        json_str = pipeline._extract_json(raw, '"corrected"')
+        return json.loads(json_str)
+    except Exception:
         return {"error": "parse_failed"}
-    return json.loads(raw[start:end])
 
 
 @app.get("/status/{job_id}")
